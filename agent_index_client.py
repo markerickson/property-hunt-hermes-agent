@@ -3,11 +3,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Publish one agent's token usage to the Agent Index.
 
-    agent_index_client.py --register --agent life [--install-url URL]
+    agent_index_client.py --register --agent life [--install-url URL] [--logo URL|FILE]
     agent_index_client.py --agent life              # then: report usage
     agent_index_client.py --agent life --dry-run    # show what would be sent
     agent_index_client.py --agent life --tags       # tags already in use
     agent_index_client.py --agent life --story ID --title T [--body B] [--tag T]...
+    agent_index_client.py --agent life --delete-story ID   # remove a story you wrote
     agent_index_client.py status                    # 0 registered, 3 not, 2 cannot tell
     agent_index_client.py --self-check
 
@@ -20,16 +21,17 @@ Collects from two places, because neither alone covers a real machine:
     zero.
 
 Sends, per call: --register posts the page content you hand it (agent id,
-name, blurb, repo, runtime, video, images, install-url), all of it public
+name, blurb, repo, runtime, video, images, install-url, logo), all of it public
 because it IS the agent's page, plus one id for this install -- random, made
 up here once and kept, so the Index can tell two installs of one agent apart
 instead of adding them together (on an id somebody else published the page is
 refused and kept as theirs, and only that install id is used, to mint this
 install's report key); a report posts day x model token counts and
-nothing else; --story posts the one story you wrote. No prompts, no task
-titles, no file paths, no costs -- the only thing MEASURED off this machine
-and sent is the token counts. Everything else is what you typed, or that one
-id, which is drawn from random bytes and says nothing about the machine.
+nothing else; --story posts the one story you wrote, and --delete-story removes
+one. No prompts, no task titles, no file paths, no costs -- the only thing
+MEASURED off this machine and sent is the token counts. Everything else is
+what you typed, or that one id, which is drawn from random bytes and says
+nothing about the machine.
 Reports use the stored Index-issued key; the Plow token is used only once to
 exchange for an assertion during registration.
 """
@@ -151,11 +153,13 @@ def _open_no_redirect(req, timeout=30):
     return urllib.request.build_opener(*handlers).open(req, timeout=timeout)
 
 
-def _post(url, body, headers):
-    req = urllib.request.Request(url, data=json.dumps(body).encode(),
+def _post(url, body, headers, method="POST"):
+    # bytes go as they are (a logo upload); anything else is JSON.
+    data = body if isinstance(body, bytes) else None if body is None else json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data,
                                  headers={"content-type": "application/json",
                                           "accept": "application/json", **headers},
-                                 method="POST")
+                                 method=method)
     try:
         with _open_no_redirect(req) as r:
             return r.status, json.loads(r.read() or b"{}")
@@ -818,13 +822,17 @@ def tags():
         sys.exit(f"  could not read tags from {_shown(url)}: {type(e).__name__}")
 
 
+# The server's cap: Vercel refuses a request body over 4.5 MB.
+LOGO_MAX_BYTES = 4 * 1024 * 1024
+
+
 def register(agent, argv):
     """Create this agent's row on the Index, so it has a page to report into.
 
     Registration is refused a key we issued ourselves, because claiming an id
     is the one thing its owner cannot undo. It takes the container's Plow
     token, which only Plow can vouch for, so a stranger's whole path is: curl
-    the file, --register, then run it on a timer.
+    the file, --register, then run it every 5 minutes.
     """
     def opt(flag, default=None):
         return argv[argv.index(flag) + 1] if flag in argv else default
@@ -836,8 +844,23 @@ def register(agent, argv):
     # link off a page anyone can read, and dropping it here would leave them
     # with no way to. The server treats "" as a clear and an absent field as
     # "leave what is on record alone".
-    if opt("--install-url") is not None:
-        body["install_url"] = opt("--install-url")
+    # --logo takes a link or a local file, the way `plow-agents profile --photo`
+    # does. A file is read now, before anything is sent, so one that cannot be
+    # uploaded never leaves a registration half done; it goes up after it.
+    logo = opt("--logo")
+    logo_file = None
+    if logo and urllib.parse.urlsplit(logo).scheme.lower() not in ("http", "https"):
+        try:
+            with open(logo, "rb") as f:
+                logo_file = f.read(LOGO_MAX_BYTES + 1)
+        except OSError as e:
+            sys.exit(f"  cannot read --logo {logo}: {e.strerror}")
+        if len(logo_file) > LOGO_MAX_BYTES:
+            sys.exit(f"  --logo {logo} is larger than {LOGO_MAX_BYTES // (1024 * 1024)} MB")
+        logo = None
+    for flag, field, value in (("--install-url", "install_url", opt("--install-url")), ("--logo", "logo", logo)):
+        if value is not None:
+            body[field] = value
     if opt("--video"):
         # The page embeds youtube-nocookie.com/embed/<id>, so this is an id,
         # not a URL — passing a URL renders a broken player on a public page.
@@ -905,14 +928,20 @@ def register(agent, argv):
     retire_legacy()
     if joining:
         print(f"  {agent} is published by someone else — reporting to it as an installer")
-        print("  Now run it on a timer to report usage.")
+        print("  Now run it every 5 minutes to report usage.")
         return 0
     print(f"  {out.get('result')} {agent} — {out.get('url')}")
+    if logo_file is not None:
+        code, up = _post(f"{API}/v1/agent-logo?agent_id={agent}", logo_file,
+                         {**assertion, "content-type": "application/octet-stream"})
+        if code != 200:
+            sys.exit(f"  logo upload failed: {code} {up}")
+        print(f"  logo — {up.get('logo')}")
     if out.get("dropped"):
         # The server tells us what it threw away; passing that silently on
         # would recreate exactly the trap the server side just removed.
         print(f"  WARNING: some values were not stored: {out['dropped']}")
-    print("  Now run it on a timer to report usage.")
+    print("  Now run it every 5 minutes to report usage.")
     return 0
 
 
@@ -937,6 +966,15 @@ def publish_story(agent, argv):
     sys.exit(0 if code == 200 else 1)
 
 
+def delete_story(agent, story_id):
+    """Remove one story this person wrote, whichever of their installs wrote it."""
+    code, out = _post(f"{API}/v1/stories?agent_id={agent}"
+                      f"&story_id={urllib.parse.quote(story_id, safe='')}",
+                      None, auth_headers(), method="DELETE")
+    print(f"  {code} {out}")
+    sys.exit(0 if code == 200 else 1)
+
+
 # Every option declared ONCE, in the set that says whether it takes a value;
 # what is merely "known" is the union of the two. The old pair listed most
 # flags twice, and that is exactly how --story came to be known but not
@@ -945,7 +983,7 @@ def publish_story(agent, argv):
 # exists to prevent.
 VALUE_FLAGS = {"--agent", "--days", "--story", "--title", "--body", "--tag",
                "--image", "--name", "--blurb", "--repo", "--runtime",
-               "--video", "--install-url"}
+               "--video", "--install-url", "--logo", "--delete-story"}
 BARE_FLAGS = {"--self-check", "--register", "--tags", "--dry-run", "--help", "-h"}
 KNOWN_FLAGS = VALUE_FLAGS | BARE_FLAGS
 
@@ -1037,6 +1075,8 @@ def main(argv):
         for t in tags():
             print(f"  {t['tag']:<28} {t['uses']} uses across {t['agents']} agent(s)")
         return
+    if "--delete-story" in argv:
+        return delete_story(agent, argv[argv.index("--delete-story") + 1])
     if "--story" in argv:
         return publish_story(agent, argv)
     # Decided BEFORE any work, not at the moment of sending. A run that

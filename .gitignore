@@ -8,3 +8,7 @@ __pycache__/
 
 # knightwatch materializes declared review siblings here during a review.
 .siblings/
+
+# Credentials & local reporting state
+plow-credentials
+.agent-index*
