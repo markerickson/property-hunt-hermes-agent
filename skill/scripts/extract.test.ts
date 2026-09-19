@@ -215,3 +215,120 @@ test('a listing whose own url will not parse falls back to the page it was read 
 
   assert.equal(scraped.listing_url, MINIMAL.url);
 });
+
+// --- Place Categories: Restaurant, Park, Camping, Group Venue ---------------
+
+test('a restaurant page extracts cuisine, price tier, and restaurant category', () => {
+  const { scraped } = extractScraped({
+    url: 'https://www.yelp.com/biz/tonys-pizza-san-francisco',
+    jsonld: [
+      {
+        '@type': 'Restaurant',
+        name: "Tony's Pizza Napoletana",
+        servesCuisine: 'Italian',
+        priceRange: '$$',
+        address: {
+          '@type': 'PostalAddress',
+          streetAddress: '1570 Stockton St',
+          addressLocality: 'San Francisco',
+          addressRegion: 'CA',
+          postalCode: '94133',
+        },
+      },
+    ],
+    og: {
+      'og:title': "Tony's Pizza Napoletana - North Beach - San Francisco, CA",
+    },
+  });
+
+  assert.equal(scraped.category, 'restaurant');
+  assert.equal(scraped.name, "Tony's Pizza Napoletana");
+  assert.equal(scraped.cuisine, 'Italian');
+  assert.equal(scraped.price_tier, '$$');
+  assert.equal(scraped.address, '1570 Stockton St');
+  assert.equal(scraped.city, 'San Francisco');
+  assert.equal(scraped.state, 'CA');
+  assert.equal(scraped.zip, '94133');
+});
+
+test('a park page extracts park category and pavilion/picnic amenities', () => {
+  const { scraped } = extractScraped({
+    url: 'https://example.com/parks/emerald-glen',
+    jsonld: [
+      {
+        '@type': 'Park',
+        name: 'Emerald Glen Park',
+        address: {
+          '@type': 'PostalAddress',
+          streetAddress: '4201 Central Pkwy',
+          addressLocality: 'Dublin',
+          addressRegion: 'CA',
+          postalCode: '94568',
+        },
+        amenityFeature: ['picnic area', 'playground'],
+      },
+    ],
+    og: {
+      'og:title': 'Emerald Glen Park | City Parks',
+      'og:description': 'Features reservable picnic pavilion, bbq pits, and soccer fields.',
+    },
+  });
+
+  assert.equal(scraped.category, 'park');
+  assert.equal(scraped.name, 'Emerald Glen Park');
+  assert.ok(scraped.amenities?.includes('picnic area'));
+  assert.ok(scraped.amenities?.includes('pavilion'));
+});
+
+test('a camping page extracts camping category from Recreation.gov', () => {
+  const { scraped } = extractScraped({
+    url: 'https://www.recreation.gov/camping/campgrounds/232449',
+    jsonld: [
+      {
+        '@type': 'Campground',
+        name: 'Upper Pines Campground',
+        address: {
+          '@type': 'PostalAddress',
+          streetAddress: 'Yosemite National Park',
+          addressLocality: 'Yosemite',
+          addressRegion: 'CA',
+          postalCode: '95389',
+        },
+      },
+    ],
+    og: {
+      'og:title': 'Upper Pines Campground, Yosemite National Park',
+    },
+  });
+
+  assert.equal(scraped.category, 'camping');
+  assert.equal(scraped.name, 'Upper Pines Campground');
+  assert.equal(scraped.city, 'Yosemite');
+});
+
+test('an event venue extracts group_venue category and attendee capacity', () => {
+  const { scraped } = extractScraped({
+    url: 'https://peerspace.com/pages/listings/12345',
+    jsonld: [
+      {
+        '@type': 'EventVenue',
+        name: 'Skyline Meeting Hall & Retreat',
+        maximumAttendeeCapacity: 75,
+        address: {
+          '@type': 'PostalAddress',
+          streetAddress: '100 Market St',
+          addressLocality: 'San Francisco',
+          addressRegion: 'CA',
+          postalCode: '94105',
+        },
+      },
+    ],
+    og: {
+      'og:title': 'Skyline Meeting Hall & Retreat',
+    },
+  });
+
+  assert.equal(scraped.category, 'group_venue');
+  assert.equal(scraped.name, 'Skyline Meeting Hall & Retreat');
+  assert.equal(scraped.capacity, 75);
+});

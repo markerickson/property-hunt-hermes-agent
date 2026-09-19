@@ -1,13 +1,11 @@
 ---
 name: property-hunt
-description: Track houses for sale on a private map. Use when the user texts a photo or screenshot of a property listing, pastes a listing URL, asks to add or remove a property, wants to rate one, leave notes on one, mark it toured or passed, refresh its price, or asks which houses they have saved. Looks the listing up in the browser on the user's Mac, keeps everything in ~/Plow/properties, and renders a map with photo pins.
+description: Search and track places on a private map: places a group could use, home searches, camping spots, parks for a party, and restaurants to visit. Use when the user texts a photo or screenshot of a place or listing, pastes a URL, asks to find places meeting group or event requirements, wants to rate a place, leave notes, mark it visited or passed, or view saved places. Looks places up in the browser on the user's Mac, keeps everything in ~/Plow/properties, and renders a map with photo pins.
 ---
 
-# Track houses for sale on a private map
+# Track places on a private map
 
-The user is house hunting. They text you photos of listings; you identify each
-one, look up what the photo doesn't show, and keep a private map they can open
-from their Mac or their phone.
+Your owner is hunting for places: places a group could use, houses/apartments to rent or buy, camping spots, parks for a party, or restaurants to visit. They text you photos, flyers, or links; you identify each place, look up what the photo doesn't show, and maintain a private map they can open from their Mac or their phone.
 
 ## How this works, and why it matters
 
@@ -88,15 +86,18 @@ here can get them back. Only when the read fails:
 { "path": "/Users/<user>/Plow/properties/data.js", "content": "[]\n" }
 ```
 
-## Adding a property
+## Adding a place
 
 A texted photo arrives as a file path. **Read the image** — you need the
-address.
+address or name.
 
-**1. Get the listing URL.** If the user pasted one, or one is legible in the
-screenshot, use it. Otherwise search for the address on Compass — that is the
-default source. Any listing site works; prefer Compass only when *you* are
-choosing.
+**1. Get the place or listing URL.** If the user pasted one, or one is legible
+in the screenshot, use it. Otherwise search for the place or address:
+- **Homes**: Compass (default), Zillow, Redfin
+- **Group Venues**: Peerspace, Eventbrite, or direct venue website
+- **Camping**: Recreation.gov, Hipcamp, or National/State Park page
+- **Parks**: City/county park page or official park website
+- **Restaurants**: Yelp, Google Maps, OpenTable, or restaurant website
 
 **2. Open a browser session for that site.** Include the apex and the wildcard.
 The owner approves this list, so asking for both at once avoids a second prompt

@@ -69,6 +69,8 @@ export type Request = {
   harvest?: string;
   url?: string;
   photoOnDisk?: boolean;
+  category?: string;
+  name?: string;
 };
 
 export function takeRequest(argv: string[], read = (p: string) => readFileSync(p, 'utf8')): Request {
@@ -89,7 +91,7 @@ export function takeRequest(argv: string[], read = (p: string) => readFileSync(p
   return req;
 }
 
-const USAGE = `property-hunt store — one JSON request file, no other arguments
+const USAGE = `place-hunt store — one JSON request file, no other arguments
 
   node properties.ts --request <path>
 
@@ -97,12 +99,13 @@ The file holds everything, because every value here is untrusted — the store
 carries the user's notes, and a note is whatever they typed:
 
   { "verb": "list", "json": true,        "store": "<contents of data.js>" }
+  { "verb": "list", "category": "park",  "store": "…" }
   { "verb": "get",  "id": "<id>",        "store": "…" }
   { "verb": "set",  "id": "<id>", "field": "${MINE_FIELDS.join('|')}", "value": "…", "store": "…" }
   { "verb": "rm",   "id": "<id>",        "store": "…" }
 
 Nothing is passed as a shell word, so no apostrophe or metacharacter in a note,
-an id, or the store can become command syntax. Adding and refreshing a property
+an id, or the store can become command syntax. Adding and refreshing a place
 is a separate command — see SKILL.md.
 
 list and get print their output. set and rm print a JSON envelope: the new
@@ -124,13 +127,22 @@ function findOrThrow(rows: Property[], id: string): Property {
 
 function summarize(row: Property): string {
   const s = row.scraped;
-  const money = s.price === null ? '?' : `$${s.price.toLocaleString('en-US')}`;
-  const facts = [s.beds && `${s.beds}bd`, s.baths && `${s.baths}ba`, s.sqft && `${s.sqft}sqft`]
+  const nameStr = s.name ? `${s.name} (${s.address})` : s.address;
+  const money = s.price === null ? (s.price_tier ?? '?') : `$${s.price.toLocaleString('en-US')}`;
+  const facts = [
+    s.beds && `${s.beds}bd`,
+    s.baths && `${s.baths}ba`,
+    s.sqft && `${s.sqft}sqft`,
+    s.capacity && `Cap: ${s.capacity}`,
+    s.cuisine && `${s.cuisine}`,
+    s.amenities?.length && s.amenities.slice(0, 3).join(', '),
+  ]
     .filter(Boolean)
     .join(' · ');
   const stars = row.mine.rating === null ? '' : ` ${'★'.repeat(row.mine.rating)}`;
   const note = row.mine.notes ? ` — ${row.mine.notes}` : '';
-  return `${row.id}\n  ${s.address}, ${s.city} ${s.state}  ${money}  ${facts}\n  [${row.mine.status}]${stars}${note}`;
+  const categoryTag = s.category && s.category !== 'home' ? `[${s.category}] ` : '';
+  return `${row.id}\n  ${categoryTag}${nameStr}, ${s.city} ${s.state}  ${money}  ${facts}\n  [${row.mine.status}]${stars}${note}`;
 }
 
 function main(argv: string[]): void {
@@ -145,13 +157,14 @@ function main(argv: string[]): void {
 
   switch (verb) {
     case 'list': {
+      const filtered = req.category ? rows.filter((r) => r.scraped.category === req.category) : rows;
       if (req.json) {
-        process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
-      } else if (rows.length === 0) {
-        process.stdout.write('no properties yet\n');
+        process.stdout.write(`${JSON.stringify(filtered, null, 2)}\n`);
+      } else if (filtered.length === 0) {
+        process.stdout.write(req.category ? `no places in category ${req.category} yet\n` : 'no properties yet\n');
       } else {
-        const label = rows.length === 1 ? 'property' : 'properties';
-        process.stdout.write(`${rows.map(summarize).join('\n\n')}\n\n${rows.length} ${label}\n`);
+        const label = filtered.length === 1 ? 'property' : 'properties';
+        process.stdout.write(`${filtered.map(summarize).join('\n\n')}\n\n${filtered.length} ${label}\n`);
       }
       return;
     }

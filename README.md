@@ -1,214 +1,105 @@
-# property-hunt
+# Place Hunt
 
-Text your agent a photo of a house for sale. It figures out which house, looks
-up everything the photo doesn't show, and puts it on a private map served on
-your own Mac at `http://127.0.0.1:8787/`.
+<p align="center">
+  <img src="logo.png" width="160" height="160" alt="Place Hunt Logo" style="border-radius: 20px;">
+</p>
 
-<!-- Runs on a Hermes agent through Plow Latch — https://howto.plow.co/property-hunt -->
+Text your agent a photo, link, or request for any place: a space a group could use, a house or apartment for sale or rent, a camping spot, a park for a party, or a restaurant to visit. It figures out the details, looks up what the photo doesn't show, and pins it to a private map served on your Mac at `http://127.0.0.1:8787/`.
+
+Listed on the [AI Worth Using Agent Index](https://aiworthusing.com/agent-index).
+
+---
 
 ## What it does
 
-- **Text a screenshot.** Zillow, Compass, a Redfin listing, a photo of a flyer —
-  anything with an address on it. The agent reads the image, finds the real
-  listing, and saves it.
-- **Talk to it normally.** *"The one on Elm — 3 stars, needs a new roof."*
-  *"Mark Oak as passed."* *"Did the Greenwich place drop?"*
-- **Open the map.** `http://127.0.0.1:8787/`. Every house is a pin showing
-  its photo, price, and bed count, coloured by whether you're interested, have
-  toured it, or passed. Click one to open the listing.
+- **Scout across 5 place categories**:
+  - 👥 **Places for groups**: Event venues, retreats, meeting rooms (capacity, rates, AV, parking).
+  - 🏠 **Home search**: Houses and apartments for sale or rent (Compass, Zillow, Redfin).
+  - ⛺ **Camping spots**: Campgrounds, tent/RV sites, cabins (Recreation.gov, Hipcamp).
+  - 🌳 **Parks for a party**: Public parks with reservable pavilions, BBQ pits, playgrounds.
+  - 🍽️ **Restaurants to visit**: Great spots for dinner or group dining (cuisine, price tier, reservations).
+- **Text a screenshot or paste a link**: A Yelp listing, a Compass link, an Instagram flyer, or a photo of a park sign — anything with a name or address.
+- **Talk to it normally**:
+  - *"Find parks near Oakland with a reservable pavilion for 30 people."*
+  - *"Which camping spots near Tahoe have lake access?"*
+  - *"The pizza place on Stockton — 5 stars, amazing crust."*
+  - *"Mark Oak as passed."*
+- **Open the map**: `http://127.0.0.1:8787/`. Filter by category (Homes, Groups, Camping, Parks, Dining) or view all places with custom status rings, photos, and key facts.
 
-## What it doesn't need
+---
 
-No API key. No account. No build step. No cloud: the map is
-[Leaflet](https://leafletjs.com), bundled, and your data is a plain file on your
-own disk.
+## How it works
 
-It does need a file server, and only because opening the page from Finder does
-not work. The map loads its store and Leaflet as separate files, and WebKit —
-Safari and everything built on it — refuses to load a subresource from a
-`file://` page, so the map comes up empty. The agent sets up a loopback-bound
-Python file server on the first save; nothing listens beyond your own machine.
+- **You hold the logic. The Mac holds the data**:
+  The Place Hunt agent runs in a container built on the [Plow base image](https://github.com/plow-pbc/plow-hermes-agent). The Mac holds only [Plow Latch](https://github.com/plow-pbc/latch) and your data in `~/Plow/properties/`.
+- **Private & Local**:
+  The map is bundled [Leaflet](https://leafletjs.com) with zero third-party cloud trackers. Nominatim geocodes addresses and OpenStreetMap serves map tiles. Your notes, ratings, and addresses stay private. The local file server starts at login via launchd.
+- **Built-in Agent Index Usage Reporting**:
+  The container includes the background `agent-index` service to report usage to the [AI Worth Using Leaderboard](https://aiworthusing.com/agent-index/publish).
 
-Four things go out to strangers, and nothing else: the listing lookup itself,
-one download of that listing's photo from whatever host it lives on, one
-[Nominatim](https://nominatim.org) geocoding request per property to turn its
-address into a pin, and [OpenStreetMap](https://www.openstreetmap.org/copyright)
-map tiles fetched while you have the map open. Your notes and ratings go to
-none of those.
+---
 
-They do travel, though, and it is worth knowing where. Anything you ask about a
-property sends the whole store — notes and ratings included — across the Plow
-relay, because that is how the agent reaches the Mac; an edit sends it back the
-same way. Serving the map to your phone sends it to whichever tailnet device
-opens it.
+## Quickstart
 
-## Requirements
-
-A Mac running [Plow Latch](https://github.com/plow-pbc/latch), a working
-`python3` on it for the map's file server, and a Hermes agent you can text.
-Tailscale as well, but only if you want the map on your phone.
-
-**The Mac holds only Latch and your data.** These scripts run in the agent's
-container, out of the seeded home copy of `skill/`, and own no state: the store and
-the harvest payload arrive in a request file the agent writes, and the new
-store comes out on stdout. The agent reads `data.js` off the Mac through Latch, runs the
-transform, and writes the result back. Nothing here is installed on the Mac, so
-nothing here can fall out of step with the agent.
-
-[howto.plow.co/property-hunt](https://howto.plow.co/property-hunt) is the
-install guide.
-
-## Running it
-
-This repo is the whole agent: the skill *and* the deployment that carries it.
-`agent-mgr` supplies everything true of every Hermes agent; nothing here names
-which person it serves, so a second operator registers their own row against
-their own checkout and gets their own home, container and project.
-
-You need [`agent-mgr`](https://github.com/plow-pbc/agent-mgr), a Docker daemon,
-`gh` authenticated (`gh auth status` — `deploy` fetches the Plow Chat plugin
-through it), and a Mac running Plow Latch.
+### 1. Configure Credentials
 
 ```sh
-git clone https://github.com/plow-pbc/property-hunt-hermes-agent.git ~/services/property-hunt-hermes-agent
-agent-mgr register property ~/services/property-hunt-hermes-agent   # supplies ${AGENT_DIR}
-agent-mgr deploy  property   # config, the Plow Chat plugin, and an empty dotenv
-
-# Now fill ~/.hermes-property/.env with DOMO_DEVICE_UID and DOMO_MCP_TOKEN,
-# minted from the Mac running Latch — see .env.example for how. `deploy` only
-# lays down the empty skeleton and never overwrites it, and config.yaml reads
-# both as ${VAR} at runtime, so an unfilled pair authenticates as nothing
-# rather than failing loudly.
-
-agent-mgr activate   property   # prints a code to text; consumes a line from the Plow pool
-agent-mgr up         property   # must precede sign-in: that runs inside this container
-agent-mgr check-latch property  # asks the relay, from inside the container, whether the pair works
-agent-mgr sign-in    property   # one-time browser OAuth for this agent
-agent-mgr agent      property 'which houses have I saved?'   # a turn without the phone
+cp plow-credentials.example plow-credentials
 ```
 
-Register the checkout itself: that row supplies the checkout path, and
-`deploy` runs this repo's `deploy-hook`, which seeds `skill/` into the agent's
-home at `skills/productivity/property-hunt` — copied when absent or empty,
-never over a non-empty agent-owned copy. The home copy is
-the one the agent runs, and it is writable: the agent edits and improves its
-own skill there, the same way it manages skills it authors itself, so drifting
-from this checkout is normal. A later deploy never overwrites it; re-seeding
-is deliberate (remove the home copy, deploy again).
+Fill in your Plow tokens and Latch credentials in `plow-credentials`:
+```sh
+PLOW_API_BASE=https://api.plow.co
+PLOW_AGENT_TOKEN=...
+AGENT_ID=place-hunt
+DOMO_DEVICE_UID=...
+DOMO_MCP_TOKEN=...
+```
 
-**Only `skill/` is seeded.** Everything else here — `agent.env`, `config.yaml`,
-`.env.example`, `tests/`, `.git` — stays outside the agent's reach. That is
-deliberate: this agent reads attacker-controlled input by design (a listing
-page's own JSON-LD, a pasted URL, a texted screenshot) while holding a Latch
-credential to your Mac, so what is reachable from its skill directory is worth
-being narrow about.
-
-**Your credentials never live in either place.** They live in
-`~/.hermes-property/.env`. The obvious slip — `cp .env.example .env` — lands at
-the root of this checkout, which is never seeded, so it stays out of the
-container. Nothing enforces that for a file put inside `skill/` directly; don't.
-
-### Deploying a change
+### 2. Run with Docker Compose
 
 ```sh
-cd ~/services/property-hunt-hermes-agent && git pull
-AGENT_TRANSITION_ACK=1 agent-mgr deploy property && AGENT_TRANSITION_ACK=1 agent-mgr up property
+docker compose up -d
 ```
 
-Every transition here asks first: `agent.env` declares `AGENT_LIVE=1`
-because real people's workflows run through this agent and the gateway
-messages them at every restart, so agent-mgr prompts `[y/N]` at a
-terminal and refuses non-interactively. `AGENT_TRANSITION_ACK=1` is the non-interactive
-acknowledgement — set it only when the restart is the point, as above.
-
-One recipe for every file here, deliberately: `config.yaml` is read at gateway
-start and `agent.env` when Compose renders, so a `git pull` alone leaves a
-running agent on the old values with no error.
-
-**A pull does not update a seeded skill.** The agent's home copy is its own —
-that is the point — so a skill change in this repo reaches an existing agent
-only when someone re-seeds deliberately (remove the home copy, deploy again)
-or hands the change to the agent to apply itself.
-
-`agent.env` declares no identity on purpose — its declarations are
-`AGENT_LIVE=1` above and `AGENT_DEPLOY_HOOK=deploy-hook`; see the comments in it.
-
-## Your data
-
-Everything lives in `~/Plow/properties/`:
-
-```
-data.js      every property — the file the map reads, and a readable JSON diff
-photos/      one hero photo per house
-index.html   the map
-```
-
-It's yours. Upgrading or removing the skill never touches it. `data.js` is plain
-JSON, so you can read it, diff it, or keep it in git.
-
-## Viewing the map on a phone
-
-Ask the agent to serve it. It installs a small launchd job on the Mac that
-starts a loopback-bound file server **at login**, then points Tailscale at
-that port. Tailscale is the sole route in and it is tailnet-scoped, so the map
-reaches your phone and never the public internet.
-
-A LaunchAgent lives in your login session, so it starts when you log in rather
-than at boot — after a restart the map comes back once you are logged in.
-
-## Where changes go
-
-This repo is one of several that assemble a Plow agent. The map of which repo
-owns what is in
-[`plow-hermes-agent` README § The repos](https://github.com/plow-pbc/plow-hermes-agent#the-repos);
-read it before a change that touches a neighbour. The test is **who else would
-have to change if this fact changed** — if the answer is a sibling, the change
-belongs there; this repo only follows, by bumping its pin if it holds one.
-
-Not here:
-
-- **Seeding and deploying** — `agent-mgr` owns the mechanism (`lib/fetch-tree`
-  plus `replay_skills()` off a `skills.tsv` manifest). What this repo's
-  `deploy-hook` owns is one policy the replay does not offer: copy the skill
-  in only when the agent's own copy is absent, never over an edited one. The
-  fetch it does to get there is the duplicated part.
-- **Container lifecycle** — the transition prompt, the compose template, the one
-  mount: `agent-mgr` again. This repo only *declares* the fact
-  (`agent.env` `AGENT_LIVE=1`).
-- **The config keys every agent shares** — plugin enablement,
-  `platforms.plow_chat`, the relay `mcp_servers` block, memory and display
-  defaults: the base image, `plow-hermes-agent` `image/seed/config.yaml`. Only
-  the model and its fallbacks are this repo's reason to exist.
-- **How a turn is framed, the Plow tools, trust and group policy** —
-  `hermes-plugin-plow` and `plow`. The Mac-side tools this skill drives are
-  `latch`'s.
-
-Examples:
-
-- Adherence — #16 deleted this repo's own `scripts/confirm-external-user`
-  transition guard once the mechanism landed in `agent-mgr#56`, leaving one
-  declared line behind: https://github.com/plow-pbc/property-hunt-hermes-agent/pull/16
-- Drift — #21's `deploy-hook` carries the copy-if-absent policy this agent
-  needs, and with it a second copy of agent-mgr's `fetch-tree` shape, its own
-  comment naming what it copies; the policy is this repo's, the fetch is not:
-  https://github.com/plow-pbc/property-hunt-hermes-agent/pull/21
-
-## Development
-
-No dependencies and no build — Node 24 runs the TypeScript directly:
-
+Or deploy locally using the Plow CLI:
 ```sh
-just test
+plow-agents deploy --local --line ln_p1
 ```
 
-The transforms take their state as text, so a test can build a store inline; the
-CLI tests write it to a request file the way the agent does. A contract test
-fails the suite if a script imports `node:fs` at all: one line in
-`properties.ts` reads the request file, and no other script imports it — the
-tests do, to stage that file.
+The image seeds the skill into `skills/productivity/place-hunt` (and `skills/productivity/property-hunt` for backward compatibility).
+
+---
+
+## Publishing to the Leaderboard
+
+See [PUBLISHING.md](PUBLISHING.md) for full instructions on publishing your agent to the [AI Worth Using Agent Index](https://aiworthusing.com/agent-index/publish).
+
+Quick registration:
+```sh
+python3 agent_index_client.py --register \
+  --agent place-hunt \
+  --name "Place Hunt" \
+  --blurb "Search and map places for groups, homes, camping spots, party parks, and restaurants" \
+  --logo ./logo.png
+```
+
+Check reporting status:
+```sh
+python3 agent_index_client.py status
+```
+
+---
+
+## Testing
+
+Run the test suite:
+```sh
+NODE_OPTIONS="--experimental-strip-types" node --test skill/scripts/*.test.ts
+```
+
+---
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Copyright 2026 The Plow Collective, Inc.
-
-"Plow" and the Plow logo are trademarks of The Plow Collective, Inc. The license grants no trademark rights.
+[MIT](LICENSE)

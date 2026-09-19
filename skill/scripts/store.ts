@@ -6,8 +6,12 @@
 // serializes rows; the agent does the reading and writing of `data.js`, on the
 // operator's Mac, through Latch.
 
-/** Scraped from a listing. Replaced wholesale on every re-scrape. */
+export type PlaceCategory = 'home' | 'group_venue' | 'camping' | 'park' | 'restaurant' | 'other';
+
+/** Scraped from a listing or place. Replaced wholesale on every re-scrape. */
 export type Scraped = {
+  name?: string | null;
+  category?: PlaceCategory;
   address: string;
   city: string;
   state: string;
@@ -18,6 +22,10 @@ export type Scraped = {
   beds: number | null;
   baths: number | null;
   sqft: number | null;
+  capacity?: number | null;
+  cuisine?: string | null;
+  price_tier?: string | null;
+  amenities?: string[] | null;
   property_type: string | null;
   listing_status: string | null;
   listing_url: string;
@@ -34,9 +42,11 @@ export type Mine = {
   added_at: string;
 };
 
-export type Property = { id: string; scraped: Scraped; mine: Mine };
+export type Place = { id: string; scraped: Scraped; mine: Mine };
+export type Property = Place;
 
 export const MINE_FIELDS = ['rating', 'status', 'notes'] as const;
+export const PLACE_CATEGORIES = ['home', 'group_venue', 'camping', 'park', 'restaurant', 'other'] as const;
 
 /**
  * The one rule for what may be a listing URL, and the only place that decides
@@ -316,7 +326,19 @@ export function coerceScraped(input: unknown): Scraped {
     throw new Error(`scraped.photo must be a plain filename under photos/, got ${JSON.stringify(photo)}`);
   }
 
+  const categoryRaw = asText('category') as PlaceCategory | null;
+  const category: PlaceCategory =
+    categoryRaw && (PLACE_CATEGORIES as readonly string[]).includes(categoryRaw)
+      ? categoryRaw
+      : 'home';
+
+  const amenities = Array.isArray(raw.amenities)
+    ? (raw.amenities as unknown[]).map(String).map((s) => s.trim()).filter(Boolean)
+    : null;
+
   return {
+    name: asText('name'),
+    category,
     address: (raw.address as string).trim(),
     city: (raw.city as string).trim(),
     state: (raw.state as string).trim(),
@@ -327,6 +349,10 @@ export function coerceScraped(input: unknown): Scraped {
     beds: asNumber('beds'),
     baths: asNumber('baths'),
     sqft: asNumber('sqft'),
+    capacity: asNumber('capacity'),
+    cuisine: asText('cuisine'),
+    price_tier: asText('price_tier'),
+    amenities,
     property_type: asText('property_type'),
     listing_status: asText('listing_status'),
     listing_url: listingUrl,
@@ -340,9 +366,11 @@ export function coerceScraped(input: unknown): Scraped {
   };
 }
 
-export function removeProperty(rows: Property[], id: string): Property[] {
+export function removePlace(rows: Place[], id: string): Place[] {
   if (!rows.some((row) => row.id === id)) {
     throw new Error(`no property with id ${JSON.stringify(id)}`);
   }
   return rows.filter((row) => row.id !== id);
 }
+
+export const removeProperty = removePlace;

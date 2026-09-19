@@ -317,6 +317,12 @@ async function main(): Promise<void> {
   }
   try {
     const extracted = extractScraped(page);
+    if (req.category) {
+      extracted.scraped.category = req.category as any;
+    }
+    if (req.name) {
+      extracted.scraped.name = req.name;
+    }
     // The same rules `upsert` applies, so anything unsaveable fails here.
     scraped = coerceScraped(extracted.scraped);
     photoUrl = extracted.photoUrl;
@@ -332,16 +338,18 @@ async function main(): Promise<void> {
 
   // Neither of the next two failures should lose the listing: a property with
   // no pin is still worth having, and the frontend surfaces it explicitly.
-  try {
-    const point = await geocode(scraped);
-    if (point) {
-      scraped.lat = point.lat;
-      scraped.lng = point.lng;
-    } else {
-      notes.push(`no coordinates found for "${scraped.address}" — it will show under "not on the map"`);
+  if (scraped.lat === null || scraped.lng === null) {
+    try {
+      const point = await geocode(scraped);
+      if (point) {
+        scraped.lat = point.lat;
+        scraped.lng = point.lng;
+      } else {
+        notes.push(`no coordinates found for "${scraped.address}" — it will show under "not on the map"`);
+      }
+    } catch (err) {
+      notes.push(`geocoding failed (${(err as Error).message}) — it will show under "not on the map"`);
     }
-  } catch (err) {
-    notes.push(`geocoding failed (${(err as Error).message}) — it will show under "not on the map"`);
   }
 
   let fetch: Fetch | undefined;

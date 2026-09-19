@@ -7,7 +7,7 @@
 // cosmetic redesign — and what lets it generalize past Compass, since
 // listing_url accepts any host.
 import { storableUrl, UNIT_DESIGNATOR } from './store.ts';
-import type { Scraped } from './store.ts';
+import type { PlaceCategory, Scraped } from './store.ts';
 
 export type PageSurfaces = {
   url: string;
@@ -23,6 +23,30 @@ const RESIDENCE_TYPES = [
   'House',
   'Product',
 ];
+
+const PLACE_TYPES: Record<string, PlaceCategory> = {
+  SingleFamilyResidence: 'home',
+  RealEstateListing: 'home',
+  Residence: 'home',
+  Apartment: 'home',
+  House: 'home',
+  Campground: 'camping',
+  CampingPitch: 'camping',
+  Park: 'park',
+  NationalPark: 'park',
+  StatePark: 'park',
+  Restaurant: 'restaurant',
+  FoodEstablishment: 'restaurant',
+  CafeOrCoffeeShop: 'restaurant',
+  BarOrPub: 'restaurant',
+  EventVenue: 'group_venue',
+  MeetingRoom: 'group_venue',
+  CivicStructure: 'park',
+  TouristAttraction: 'other',
+  LodgingBusiness: 'group_venue',
+  LocalBusiness: 'other',
+  Place: 'other',
+};
 
 /** JSON-LD arrives as arrays, single objects, or @graph wrappers. Flatten all three. */
 export function flattenJsonLd(blocks: unknown[]): Record<string, unknown>[] {
@@ -171,13 +195,37 @@ export type Extracted = { scraped: Omit<Scraped, 'listing_source'>; photoUrl: st
  */
 export function extractScraped(page: PageSurfaces, now: string = new Date().toISOString()): Extracted {
   const nodes = flattenJsonLd(page.jsonld);
-  const listing =
+  const knownResidence =
     nodes.find((node) => typesOf(node).some((t) => RESIDENCE_TYPES.includes(t) && t !== 'Product')) ??
     nodes.find((node) => typesOf(node).includes('Product'));
+  const knownPlace = nodes.find((node) => typesOf(node).some((t) => Object.keys(PLACE_TYPES).includes(t)));
+  const listing = knownResidence ?? knownPlace;
 
   const og = page.og;
   const blurb = og['og:description'] ?? og['twitter:description'] ?? '';
   const fromBlurb = parseDescription(blurb);
+
+  let category: PlaceCategory = 'home';
+  if (listing) {
+    for (const t of typesOf(listing)) {
+      if (PLACE_TYPES[t]) {
+        category = PLACE_TYPES[t];
+        break;
+      }
+    }
+  }
+  const lowerUrl = page.url.toLowerCase();
+  if (/recreation\.gov|hipcamp\.com|campground/i.test(lowerUrl)) {
+    category = 'camping';
+  } else if (/yelp\.com\/biz|opentable\.com|resy\.com/i.test(lowerUrl)) {
+    category = 'restaurant';
+  } else if (/peerspace\.com|eventbrite\.com/i.test(lowerUrl)) {
+    category = 'group_venue';
+  }
+
+  const name =
+    (typeof firstDeep(listing, 'name') === 'string' ? (firstDeep(listing, 'name') as string).trim() : undefined) ??
+    (og['og:title'] ? og['og:title'].split('|')[0].split(' - ')[0].trim() : null);
 
   const addressLine =
     parseAddressLine(og['og:title'] ?? '') ??
@@ -207,6 +255,40 @@ export function extractScraped(page: PageSurfaces, now: string = new Date().toIS
   const floorPlan = listing ? (firstDeep(listing, 'accommodationFloorPlan') as Record<string, unknown> | undefined) : undefined;
   const floorSize = listing ? firstDeep(listing, 'floorSize') : undefined;
 
+  const capacity =
+    toNumber(firstDeep(listing, 'maximumAttendeeCapacity')) ??
+    toNumber(firstDeep(listing, 'occupancy')) ??
+    toNumber(blurb.match(/(?:capacity|seats|accommodates|for up to)\s*(\d+)/i)?.[1]);
+
+  const cuisine =
+    (typeof firstDeep(listing, 'servesCuisine') === 'string'
+      ? (firstDeep(listing, 'servesCuisine') as string).trim()
+      : null);
+
+  const priceTier =
+    (typeof firstDeep(listing, 'priceRange') === 'string'
+      ? (firstDeep(listing, 'priceRange') as string).trim()
+      : null);
+
+  const amenities: string[] = [];
+  const rawAmenity = firstDeep(listing, 'amenityFeature');
+  if (Array.isArray(rawAmenity)) {
+    for (const a of rawAmenity) {
+      if (typeof a === 'string' && a.trim()) amenities.push(a.trim());
+      else if (a && typeof a === 'object' && typeof (a as Record<string, unknown>).name === 'string') {
+        const n = ((a as Record<string, unknown>).name as string).trim();
+        if (n) amenities.push(n);
+      }
+    }
+  }
+  const keywords = ['pavilion', 'picnic', 'bbq', 'restrooms', 'playground', 'wifi', 'parking', 'fire pit', 'lake', 'swimming'];
+  const lowerBlurb = blurb.toLowerCase();
+  for (const kw of keywords) {
+    if (lowerBlurb.includes(kw) && !amenities.includes(kw)) {
+      amenities.push(kw);
+    }
+  }
+
   // og:url and JSON-LD url are sometimes site-relative; resolve against the
   // page. Both are site-controlled text, so take the first candidate that
   // PARSES rather than throwing on the first that does not — a page
@@ -234,22 +316,31 @@ export function extractScraped(page: PageSurfaces, now: string = new Date().toIS
     (typeof image === 'string' ? image : undefined) ??
     og['og:image'];
 
-
   const propertyType =
     listing ? typesOf(listing).find((t) => t !== 'Product' && t !== 'RealEstateListing') ?? null : null;
 
+  const geo = listing ? (firstDeep(listing, 'geo') as Record<string, unknown> | undefined) : undefined;
+  const lat = toNumber(geo?.latitude) ?? toNumber(firstDeep(listing, 'latitude'));
+  const lng = toNumber(geo?.longitude) ?? toNumber(firstDeep(listing, 'longitude'));
+
   return {
     scraped: {
+      name: name ?? null,
+      category,
       address: address.address,
       city: address.city,
       state: address.state,
       zip: address.zip,
-      lat: null,
-      lng: null,
+      lat: lat ?? null,
+      lng: lng ?? null,
       price: toNumber(offers?.price) ?? fromBlurb.price,
       beds: toNumber(floorPlan?.numberOfBedrooms) ?? fromBlurb.beds,
       baths: toNumber(floorPlan?.numberOfBathroomsTotal) ?? fromBlurb.baths,
       sqft: toNumber(firstDeep(floorSize, 'value')) ?? fromBlurb.sqft,
+      capacity: capacity ?? null,
+      cuisine: cuisine ?? null,
+      price_tier: priceTier ?? null,
+      amenities: amenities.length > 0 ? amenities : null,
       property_type: propertyType,
       listing_status: statusFrom(offers?.availability),
       listing_url: listingUrl,
